@@ -580,7 +580,7 @@ function AdminDashboard({ secret }) {
               className="muted"
               style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}
             >
-              제출 현황 (실제 학생만 표시)
+              제출 현황
             </div>
             <div
               style={{
@@ -590,7 +590,7 @@ function AdminDashboard({ secret }) {
                 fontSize: 13,
               }}
             >
-              {realStudents.map((s) => {
+              {students.map((s) => {
                 const submitted = bidSubmittedIds.includes(s.id);
                 return (
                   <div
@@ -599,9 +599,15 @@ function AdminDashboard({ secret }) {
                       padding: '4px 8px',
                       background: submitted ? '#e7f0e8' : '#faf3e0',
                       borderRadius: 4,
+                      border: s.isTest ? '1px dashed var(--accent)' : 'none',
                     }}
                   >
                     {submitted ? '✓' : '⏳'} {s.name}
+                    {s.isTest && (
+                      <span className="muted" style={{ fontSize: 11 }}>
+                        {' '}[test]
+                      </span>
+                    )}
                   </div>
                 );
               })}
