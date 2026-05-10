@@ -299,16 +299,30 @@ function AdminDashboard({ secret }) {
             <div key={k}>
               <label className="label">{label}</label>
               <div className="row">
-                <input
-                  className="input" type="number"
-                  value={payoff[k][0]}
-                  onChange={(e) => setPayoff({ ...payoff, [k]: [Number(e.target.value), payoff[k][1]] })}
-                />
-                <input
-                  className="input" type="number"
-                  value={payoff[k][1]}
-                  onChange={(e) => setPayoff({ ...payoff, [k]: [payoff[k][0], Number(e.target.value)] })}
-                />
+                <div style={{ position: 'relative', flex: 1 }}>
+                  <input
+                    className="input" type="text" inputMode="numeric"
+                    value={payoff[k][0].toLocaleString('ko-KR')}
+                    onChange={(e) => {
+                      const v = e.target.value.replace(/[^\d-]/g, '');
+                      setPayoff({ ...payoff, [k]: [v === '' || v === '-' ? 0 : Number(v), payoff[k][1]] });
+                    }}
+                    style={{ paddingRight: 36, textAlign: 'right' }}
+                  />
+                  <span style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-soft)', fontSize: 14, pointerEvents: 'none' }}>원</span>
+                </div>
+                <div style={{ position: 'relative', flex: 1 }}>
+                  <input
+                    className="input" type="text" inputMode="numeric"
+                    value={payoff[k][1].toLocaleString('ko-KR')}
+                    onChange={(e) => {
+                      const v = e.target.value.replace(/[^\d-]/g, '');
+                      setPayoff({ ...payoff, [k]: [payoff[k][0], v === '' || v === '-' ? 0 : Number(v)] });
+                    }}
+                    style={{ paddingRight: 36, textAlign: 'right' }}
+                  />
+                  <span style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-soft)', fontSize: 14, pointerEvents: 'none' }}>원</span>
+                </div>
               </div>
             </div>
           ))}
