@@ -394,6 +394,9 @@ function AdminDashboard({ secret }) {
   const bidSubmittedRealCount = realStudents.filter((s) =>
     bidSubmittedIds.includes(s.id)
   ).length;
+  const bidSubmittedTestCount = testStudents.filter((s) =>
+    bidSubmittedIds.includes(s.id)
+  ).length;
   const bidStatus = bidState.status || 'idle';
   const allRealBid =
     bidStatus === 'active' &&
@@ -552,9 +555,10 @@ function AdminDashboard({ secret }) {
             <button
               className="btn btn-accent"
               onClick={confirmBidGame}
-              disabled={bidSubmittedRealCount === 0}
+              disabled={bidSubmittedIds.length === 0}
             >
-              ✓ 결과 확정 ({bidSubmittedRealCount}/{realStudents.length})
+              ✓ 결과 확정 ({bidSubmittedRealCount}/{realStudents.length}
+              {bidSubmittedTestCount > 0 ? ` · 테스트 ${bidSubmittedTestCount}` : ''})
             </button>
           )}
           <button className="btn btn-secondary" onClick={resetBidGame}>
