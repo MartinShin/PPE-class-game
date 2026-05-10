@@ -92,9 +92,9 @@ export default function StudentDashboard({ params }) {
               {myResult.payoff.toLocaleString()} 원
             </div>
             <div className="muted" style={{ fontSize: 13 }}>
-              나의 선택: <b>{myResult.myChoice === 'D' ? '부인' : '고발'}</b>
+              나의 선택: <b>{(pdState.strategies || { D: '부인', R: '고발' })[myResult.myChoice]}</b>
               {' / '}
-              상대 선택: <b>{myResult.opponentChoice === 'D' ? '부인' : '고발'}</b>
+              상대 선택: <b>{(pdState.strategies || { D: '부인', R: '고발' })[myResult.opponentChoice]}</b>
             </div>
           </div>
         )}

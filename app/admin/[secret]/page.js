@@ -70,8 +70,8 @@ function AdminDashboard({ secret }) {
   const [msg, setMsg] = useState('');
   const [pairs, setPairs] = useState([]);
   const [payoff, setPayoff] = useState(null);
+  const [strategies, setStrategies] = useState(null);
 
-  // 새 학생 추가용
   const [newStudentName, setNewStudentName] = useState('');
   const [newIsTest, setNewIsTest] = useState(false);
 
@@ -81,6 +81,9 @@ function AdminDashboard({ secret }) {
     return { 'Content-Type': 'application/json', 'X-Admin-Token': token || '' };
   }
 
+  // 동적 전략 라벨 (편집 중에도 즉시 반영하기 위해 admin 로컬 strategies 사용)
+  const sLabel = (key) => strategies?.[key] || (key === 'D' ? '부인' : '고발');
+
   async function refresh() {
     const [r1, r2] = await Promise.all([
       fetch(`/api/admin/students?secret=${secret}`, { headers: authHeaders() }).then((r) => r.json()),
@@ -89,10 +92,10 @@ function AdminDashboard({ secret }) {
     if (r1.ok) setStudents(r1.students);
     if (r2.ok) {
       setPdState(r2.state);
-      // 페이오프와 페어는 사용자가 편집 중일 수 있으므로
-      // 처음 한 번만 서버 값을 채우고, 그 후엔 절대 덮어쓰지 않는다.
+      // 사용자가 편집 중일 수 있으므로 처음 한 번만 서버 값으로 채움
       setPairs((prev) => (prev.length === 0 && r2.state.pairs?.length ? r2.state.pairs : prev));
       setPayoff((prev) => prev || r2.state.payoff || null);
+      setStrategies((prev) => prev || r2.state.strategies || { D: '부인', R: '고발' });
     }
     setLoading(false);
   }
@@ -105,7 +108,6 @@ function AdminDashboard({ secret }) {
 
   // ---------- 게임 컨트롤 ----------
   function autoPair() {
-    // 가짜학생 제외하고 실제 학생만 짝짓기
     const ids = students.filter((s) => !s.isTest).map((s) => s.id);
     for (let i = ids.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
@@ -128,7 +130,7 @@ function AdminDashboard({ secret }) {
     const cleaned = pairs.filter((p) => p[0] && p[1] && p[0] !== p[1]);
     const res = await fetch('/api/admin/pd/setup', {
       method: 'POST', headers: authHeaders(),
-      body: JSON.stringify({ secret, pairs: cleaned, payoff }),
+      body: JSON.stringify({ secret, pairs: cleaned, payoff, strategies }),
     });
     const data = await res.json();
     setMsg(data.ok ? '✓ 설정 저장됨' : `오류: ${data.error}`);
@@ -238,7 +240,7 @@ function AdminDashboard({ secret }) {
     setNewIsTest(false);
   }
 
-  if (loading || !pdState || !payoff) {
+  if (loading || !pdState || !payoff || !strategies) {
     return <div className="container"><div className="muted">로딩 중…</div></div>;
   }
 
@@ -285,7 +287,36 @@ function AdminDashboard({ secret }) {
         </div>
       </div>
 
-      {/* === 페이오프 === */}
+      {/* === 전략 이름 === */}
+      <div className="card">
+        <div className="section-title">전략 이름</div>
+        <div className="muted" style={{ fontSize: 12, margin: '8px 0' }}>
+          학생들이 보는 두 가지 선택지의 이름을 자유롭게 정하세요. (예: 협력/배신, 비둘기/매, A/B …)
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <div>
+            <label className="label">전략 1 (내부 키: D)</label>
+            <input
+              className="input"
+              value={strategies.D}
+              onChange={(e) => setStrategies({ ...strategies, D: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="label">전략 2 (내부 키: R)</label>
+            <input
+              className="input"
+              value={strategies.R}
+              onChange={(e) => setStrategies({ ...strategies, R: e.target.value })}
+            />
+          </div>
+        </div>
+        <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+          ※ 변경 후 아래 짝 편성의 「설정 저장」을 눌러야 학생 화면에 반영됩니다.
+        </div>
+      </div>
+
+      {/* === 페이오프 (직접 입력 + 원 단위) === */}
       <div className="card">
         <div className="section-title">보수 행렬 (단위: 원)</div>
         <div className="muted" style={{ fontSize: 12, margin: '8px 0' }}>
@@ -293,38 +324,22 @@ function AdminDashboard({ secret }) {
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           {[
-            ['DD', '학생1 부인 · 학생2 부인 (D, D)'],
-            ['DR', '학생1 부인 · 학생2 고발 (D, R)'],
-            ['RD', '학생1 고발 · 학생2 부인 (R, D)'],
-            ['RR', '학생1 고발 · 학생2 고발 (R, R)'],
+            ['DD', `학생1 ${sLabel('D')} · 학생2 ${sLabel('D')}`],
+            ['DR', `학생1 ${sLabel('D')} · 학생2 ${sLabel('R')}`],
+            ['RD', `학생1 ${sLabel('R')} · 학생2 ${sLabel('D')}`],
+            ['RR', `학생1 ${sLabel('R')} · 학생2 ${sLabel('R')}`],
           ].map(([k, label]) => (
             <div key={k}>
               <label className="label">{label}</label>
               <div className="row">
-                <div style={{ position: 'relative', flex: 1 }}>
-                  <input
-                    className="input" type="text" inputMode="numeric"
-                    value={payoff[k][0].toLocaleString('ko-KR')}
-                    onChange={(e) => {
-                      const v = e.target.value.replace(/[^\d-]/g, '');
-                      setPayoff({ ...payoff, [k]: [v === '' || v === '-' ? 0 : Number(v), payoff[k][1]] });
-                    }}
-                    style={{ paddingRight: 36, textAlign: 'right' }}
-                  />
-                  <span style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-soft)', fontSize: 14, pointerEvents: 'none' }}>원</span>
-                </div>
-                <div style={{ position: 'relative', flex: 1 }}>
-                  <input
-                    className="input" type="text" inputMode="numeric"
-                    value={payoff[k][1].toLocaleString('ko-KR')}
-                    onChange={(e) => {
-                      const v = e.target.value.replace(/[^\d-]/g, '');
-                      setPayoff({ ...payoff, [k]: [payoff[k][0], v === '' || v === '-' ? 0 : Number(v)] });
-                    }}
-                    style={{ paddingRight: 36, textAlign: 'right' }}
-                  />
-                  <span style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-soft)', fontSize: 14, pointerEvents: 'none' }}>원</span>
-                </div>
+                <PayoffInput
+                  value={payoff[k][0]}
+                  onChange={(v) => setPayoff({ ...payoff, [k]: [v, payoff[k][1]] })}
+                />
+                <PayoffInput
+                  value={payoff[k][1]}
+                  onChange={(v) => setPayoff({ ...payoff, [k]: [payoff[k][0], v] })}
+                />
               </div>
             </div>
           ))}
@@ -389,13 +404,13 @@ function AdminDashboard({ secret }) {
                 const b = students.find((s) => s.id === pair[1]);
                 const ca = pdState.choices?.[pair[0]];
                 const cb = pdState.choices?.[pair[1]];
+                const labelOf = (c) => c ? `✓ ${pdState.strategies?.[c] || sLabel(c)}` : '⏳ 대기';
                 return (
                   <tr key={i}>
                     <td>{a?.name || '?'} vs {b?.name || '?'}</td>
                     <td>
-                      {a?.name}: {ca === 'D' ? '✓ 부인' : ca === 'R' ? '✓ 고발' : '⏳ 대기'}
-                      <br />
-                      {b?.name}: {cb === 'D' ? '✓ 부인' : cb === 'R' ? '✓ 고발' : '⏳ 대기'}
+                      {a?.name}: {labelOf(ca)}<br />
+                      {b?.name}: {labelOf(cb)}
                     </td>
                   </tr>
                 );
@@ -417,7 +432,7 @@ function AdminDashboard({ secret }) {
                 return (
                   <tr key={sid}>
                     <td>{s?.name || sid}</td>
-                    <td>{r.myChoice === 'D' ? '부인' : '고발'}</td>
+                    <td>{pdState.strategies?.[r.myChoice] || sLabel(r.myChoice)}</td>
                     <td className="amount-col">{r.payoff.toLocaleString()}원</td>
                   </tr>
                 );
@@ -431,7 +446,7 @@ function AdminDashboard({ secret }) {
       <div className="card">
         <div className="section-title">학생 명단 / 잔고 관리</div>
         <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-          이름 클릭 = 이름 수정 · ✎ = 잔고 +/− · ↺ = PIN을 1111로 초기화 · T = 테스트학생 토글 · ✕ = 삭제
+          이름 클릭 = 수정 · +/− = 잔고 조정 · = = 잔고 설정 · ↺ = PIN 1111로 · T = 테스트 토글 · ✕ = 삭제
         </div>
         <div style={{ height: 10 }} />
 
@@ -486,6 +501,29 @@ function AdminDashboard({ secret }) {
       <div className="muted" style={{ fontSize: 12, padding: '20px 0' }}>
         💡 테스트 모드 학생 화면은 <code>/?test=1</code> URL로 접속.
       </div>
+    </div>
+  );
+}
+
+// 천 단위 콤마 + "원" 단위 표시 + 직접 입력 가능한 보수 입력칸
+function PayoffInput({ value, onChange }) {
+  return (
+    <div style={{ position: 'relative', flex: 1 }}>
+      <input
+        className="input"
+        type="text"
+        inputMode="numeric"
+        value={value.toLocaleString('ko-KR')}
+        onChange={(e) => {
+          const v = e.target.value.replace(/[^\d-]/g, '');
+          onChange(v === '' || v === '-' ? 0 : Number(v));
+        }}
+        style={{ paddingRight: 36, textAlign: 'right' }}
+      />
+      <span style={{
+        position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
+        color: 'var(--ink-soft)', fontSize: 14, pointerEvents: 'none',
+      }}>원</span>
     </div>
   );
 }

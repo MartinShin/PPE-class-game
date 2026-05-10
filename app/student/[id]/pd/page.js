@@ -31,13 +31,12 @@ export default function PrisonersDilemma({ params }) {
     return () => clearInterval(t);
   }, []);
 
-  // 짝 결정: pair 배열의 [0]번이 학생1(행), [1]번이 학생2(열)
   useEffect(() => {
     if (!pdState || !me) return;
     const pair = pdState.pairs?.find((p) => p.includes(id));
     if (pair) {
       const oppId = pair[0] === id ? pair[1] : pair[0];
-      const myRole = pair[0] === id ? 'p1' : 'p2'; // 'p1'=학생1=행, 'p2'=학생2=열
+      const myRole = pair[0] === id ? 'p1' : 'p2';
       fetch(`/api/student/${oppId}`)
         .then((r) => r.json())
         .then((d) => {
@@ -68,6 +67,9 @@ export default function PrisonersDilemma({ params }) {
     return <div className="container"><div className="muted">로딩 중…</div></div>;
   }
 
+  // 전략 라벨 (서버 상태에서 가져옴, 없으면 기본값)
+  const strat = pdState.strategies || { D: '부인', R: '고발' };
+
   if (pdState.status === 'completed') {
     return (
       <div className="container">
@@ -95,7 +97,6 @@ export default function PrisonersDilemma({ params }) {
   }
 
   const payoff = pdState.payoff;
-  // 학생1(p1)은 보수 행렬의 왼쪽 라벨(행), 학생2(p2)는 위쪽 라벨(열)
   const myLabel = opponent.myRole === 'p1' ? '학생 1' : '학생 2';
   const oppLabel = opponent.myRole === 'p1' ? '학생 2' : '학생 1';
 
@@ -129,13 +130,13 @@ export default function PrisonersDilemma({ params }) {
               <th colSpan="2">학생 2</th>
             </tr>
             <tr>
-              <th>부인 (Deny)</th>
-              <th>고발 (Report)</th>
+              <th>{strat.D}</th>
+              <th>{strat.R}</th>
             </tr>
           </thead>
           <tbody>
             <tr>
-              <th style={{ background: '#f0ebe0' }} rowSpan="1">학생 1<br/>부인</th>
+              <th style={{ background: '#f0ebe0' }}>학생 1<br/>{strat.D}</th>
               <td className="payoff-cell">
                 <div className="diag" />
                 <div className="row-val">{payoff.DD[0].toLocaleString()}</div>
@@ -148,7 +149,7 @@ export default function PrisonersDilemma({ params }) {
               </td>
             </tr>
             <tr>
-              <th style={{ background: '#f0ebe0' }}>학생 1<br/>고발</th>
+              <th style={{ background: '#f0ebe0' }}>학생 1<br/>{strat.R}</th>
               <td className="payoff-cell">
                 <div className="diag" />
                 <div className="row-val">{payoff.RD[0].toLocaleString()}</div>
@@ -177,16 +178,14 @@ export default function PrisonersDilemma({ params }) {
             onClick={() => submitChoice('D')}
             disabled={!!myChoice || submitting}
           >
-            부인<br />
-            <span style={{ fontSize: 13, fontWeight: 400, opacity: 0.8 }}>(Deny)</span>
+            {strat.D}
           </button>
           <button
             className={`choice-btn ${myChoice === 'R' ? 'active-report' : ''}`}
             onClick={() => submitChoice('R')}
             disabled={!!myChoice || submitting}
           >
-            고발<br />
-            <span style={{ fontSize: 13, fontWeight: 400, opacity: 0.8 }}>(Report)</span>
+            {strat.R}
           </button>
         </div>
         {error && <div className="error">{error}</div>}
@@ -195,7 +194,7 @@ export default function PrisonersDilemma({ params }) {
       {myChoice && (
         <div className="card" style={{ background: '#e7f0e8', borderColor: 'var(--green)' }}>
           <div style={{ fontWeight: 700, color: 'var(--green)' }}>
-            ✓ 선택 제출됨: {myChoice === 'D' ? '부인' : '고발'}
+            ✓ 선택 제출됨: {strat[myChoice]}
           </div>
           <div className="muted" style={{ marginTop: 4 }}>
             상대방과 교수님의 확정을 기다리는 중입니다.
