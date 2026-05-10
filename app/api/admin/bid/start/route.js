@@ -14,45 +14,27 @@ function verifyAdmin(secret, token) {
 export async function POST(req) {
   try {
     const token = req.headers.get('X-Admin-Token') || '';
-    const body = await req.json();
-    const { secret, min, max, showWinnerNames } = body;
+    const { secret } = await req.json();
 
     if (!verifyAdmin(secret, token)) {
       return Response.json({ ok: false, error: '인증 실패' }, { status: 401 });
     }
 
-    const minN = Number(min);
-    const maxN = Number(max);
-
-    if (!Number.isInteger(minN) || minN < 0) {
-      return Response.json({
-        ok: false,
-        error: '최소값은 0 이상의 정수여야 합니다',
-      });
-    }
-    if (!Number.isInteger(maxN) || maxN < minN) {
-      return Response.json({
-        ok: false,
-        error: '최대값은 최소값 이상의 정수여야 합니다',
-      });
-    }
-
     const state = await getBidState();
 
-    // 게임이 진행 중일 때는 설정 변경 금지 (값 일관성 보호)
     if (state.status === 'active') {
       return Response.json({
         ok: false,
-        error: '게임 진행 중에는 설정을 바꿀 수 없습니다. 초기화 후 시도하세요.',
+        error: '이미 게임이 진행 중입니다',
       });
     }
 
-    state.settings = {
-      ...state.settings,
-      min: minN,
-      max: maxN,
-      showWinnerNames: !!showWinnerNames,
-    };
+    state.status = 'active';
+    state.round = (state.round || 0) + 1;
+    state.bids = {};
+    state.results = null;
+    state.startedAt = Date.now();
+    state.completedAt = null;
     await setBidState(state);
 
     return Response.json({ ok: true, state });
