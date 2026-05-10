@@ -89,8 +89,10 @@ function AdminDashboard({ secret }) {
     if (r1.ok) setStudents(r1.students);
     if (r2.ok) {
       setPdState(r2.state);
-      if (r2.state.pairs?.length && pairs.length === 0) setPairs(r2.state.pairs);
-      if (r2.state.payoff && !payoff) setPayoff(r2.state.payoff);
+      // 페이오프와 페어는 사용자가 편집 중일 수 있으므로
+      // 처음 한 번만 서버 값을 채우고, 그 후엔 절대 덮어쓰지 않는다.
+      setPairs((prev) => (prev.length === 0 && r2.state.pairs?.length ? r2.state.pairs : prev));
+      setPayoff((prev) => prev || r2.state.payoff || null);
     }
     setLoading(false);
   }
