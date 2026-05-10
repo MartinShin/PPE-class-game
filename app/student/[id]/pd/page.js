@@ -1,11 +1,9 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
 export default function PrisonersDilemma({ params }) {
   const { id } = params;
-  const router = useRouter();
   const [pdState, setPdState] = useState(null);
   const [me, setMe] = useState(null);
   const [opponent, setOpponent] = useState(null);
@@ -20,7 +18,6 @@ export default function PrisonersDilemma({ params }) {
     ]);
     if (r1.ok) {
       setPdState(r1.state);
-      // 내 선택을 서버 상태에서 가져오기 (재접속 시 유지)
       if (r1.state.choices?.[id]) {
         setMyChoice(r1.state.choices[id]);
       }
@@ -34,20 +31,17 @@ export default function PrisonersDilemma({ params }) {
     return () => clearInterval(t);
   }, []);
 
-  // 짝과 역할 결정
+  // 짝 결정: pair 배열의 [0]번이 학생1(행), [1]번이 학생2(열)
   useEffect(() => {
     if (!pdState || !me) return;
     const pair = pdState.pairs?.find((p) => p.includes(id));
     if (pair) {
       const oppId = pair[0] === id ? pair[1] : pair[0];
+      const myRole = pair[0] === id ? 'p1' : 'p2'; // 'p1'=학생1=행, 'p2'=학생2=열
       fetch(`/api/student/${oppId}`)
         .then((r) => r.json())
         .then((d) => {
-          if (d.ok) {
-            // 행/열 결정: pair 배열에서 첫번째가 행(row), 두번째가 열(col)
-            const myRole = pair[0] === id ? 'row' : 'col';
-            setOpponent({ ...d.student, role: myRole === 'row' ? 'col' : 'row', myRole });
-          }
+          if (d.ok) setOpponent({ ...d.student, myRole });
         });
     }
   }, [pdState, me, id]);
@@ -74,7 +68,6 @@ export default function PrisonersDilemma({ params }) {
     return <div className="container"><div className="muted">로딩 중…</div></div>;
   }
 
-  // 게임 종료된 경우
   if (pdState.status === 'completed') {
     return (
       <div className="container">
@@ -88,7 +81,6 @@ export default function PrisonersDilemma({ params }) {
     );
   }
 
-  // 게임 비활성/짝 없음
   if (pdState.status !== 'active' || !opponent) {
     return (
       <div className="container">
@@ -103,10 +95,9 @@ export default function PrisonersDilemma({ params }) {
   }
 
   const payoff = pdState.payoff;
-  // 내 시점에서 보수 표를 보여줄 때, 행/열 위치는 그대로 유지하되
-  // 내가 row이면 row의 보수가 내 보수, 내가 col이면 col의 보수가 내 보수
-  const myRoleLabel = opponent.myRole === 'row' ? '행 (Row)' : '열 (Column)';
-  const oppRoleLabel = opponent.myRole === 'row' ? '열 (Column)' : '행 (Row)';
+  // 학생1(p1)은 보수 행렬의 왼쪽 라벨(행), 학생2(p2)는 위쪽 라벨(열)
+  const myLabel = opponent.myRole === 'p1' ? '학생 1' : '학생 2';
+  const oppLabel = opponent.myRole === 'p1' ? '학생 2' : '학생 1';
 
   return (
     <div className="container">
@@ -118,24 +109,24 @@ export default function PrisonersDilemma({ params }) {
       <div className="card">
         <div className="row-between" style={{ marginBottom: 6 }}>
           <div className="muted">상대방</div>
-          <span className="role-badge">나는 {myRoleLabel}</span>
+          <span className="role-badge">나는 {myLabel}</span>
         </div>
         <div style={{ fontSize: 22, fontWeight: 700 }}>{opponent.name}</div>
         <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>
-          {opponent.name} 학생은 {oppRoleLabel}
+          {opponent.name}: {oppLabel}
         </div>
       </div>
 
       <div className="card">
         <div className="section-title">보수 행렬</div>
         <div className="muted" style={{ fontSize: 12, margin: '8px 0' }}>
-          왼쪽 위: 행 학생 보수 (초록) · 오른쪽 아래: 열 학생 보수 (빨강) · 단위: 원
+          왼쪽 위: 학생 1 보수 (초록) · 오른쪽 아래: 학생 2 보수 (빨강) · 단위: 원
         </div>
         <table className="payoff-table">
           <thead>
             <tr>
               <th className="corner" rowSpan="2"></th>
-              <th colSpan="2">열 (Column) 학생</th>
+              <th colSpan="2">학생 2</th>
             </tr>
             <tr>
               <th>부인 (Deny)</th>
@@ -144,7 +135,7 @@ export default function PrisonersDilemma({ params }) {
           </thead>
           <tbody>
             <tr>
-              <th style={{ background: '#f0ebe0' }}>행 부인</th>
+              <th style={{ background: '#f0ebe0' }} rowSpan="1">학생 1<br/>부인</th>
               <td className="payoff-cell">
                 <div className="diag" />
                 <div className="row-val">{payoff.DD[0].toLocaleString()}</div>
@@ -157,7 +148,7 @@ export default function PrisonersDilemma({ params }) {
               </td>
             </tr>
             <tr>
-              <th style={{ background: '#f0ebe0' }}>행 고발</th>
+              <th style={{ background: '#f0ebe0' }}>학생 1<br/>고발</th>
               <td className="payoff-cell">
                 <div className="diag" />
                 <div className="row-val">{payoff.RD[0].toLocaleString()}</div>

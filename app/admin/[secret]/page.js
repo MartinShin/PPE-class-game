@@ -7,7 +7,6 @@ export default function AdminPage({ params }) {
   const [pwd, setPwd] = useState('');
   const [authError, setAuthError] = useState('');
 
-  // 로그인
   async function login() {
     const res = await fetch('/api/admin/auth', {
       method: 'POST',
@@ -24,7 +23,6 @@ export default function AdminPage({ params }) {
   }
 
   useEffect(() => {
-    // 세션에 토큰이 있으면 자동 인증 시도
     const token = sessionStorage.getItem('admin-token');
     if (token) {
       fetch('/api/admin/auth', {
@@ -70,19 +68,17 @@ function AdminDashboard({ secret }) {
   const [pdState, setPdState] = useState(null);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState('');
-
-  // 페어 편집용 임시 상태
   const [pairs, setPairs] = useState([]);
-  // 페이오프 편집용
   const [payoff, setPayoff] = useState(null);
+
+  // 새 학생 추가용
+  const [newStudentName, setNewStudentName] = useState('');
+  const [newIsTest, setNewIsTest] = useState(false);
 
   const token = typeof window !== 'undefined' ? sessionStorage.getItem('admin-token') : '';
 
   function authHeaders() {
-    return {
-      'Content-Type': 'application/json',
-      'X-Admin-Token': token || '',
-    };
+    return { 'Content-Type': 'application/json', 'X-Admin-Token': token || '' };
   }
 
   async function refresh() {
@@ -105,18 +101,16 @@ function AdminDashboard({ secret }) {
     return () => clearInterval(t);
   }, []);
 
-  // 페어 자동 생성 (랜덤)
+  // ---------- 게임 컨트롤 ----------
   function autoPair() {
-    const ids = students.map((s) => s.id);
-    // Fisher-Yates
+    // 가짜학생 제외하고 실제 학생만 짝짓기
+    const ids = students.filter((s) => !s.isTest).map((s) => s.id);
     for (let i = ids.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [ids[i], ids[j]] = [ids[j], ids[i]];
     }
     const newPairs = [];
-    for (let i = 0; i < ids.length - 1; i += 2) {
-      newPairs.push([ids[i], ids[i + 1]]);
-    }
+    for (let i = 0; i < ids.length - 1; i += 2) newPairs.push([ids[i], ids[i + 1]]);
     setPairs(newPairs);
   }
 
@@ -125,22 +119,13 @@ function AdminDashboard({ secret }) {
     next[idx][slot] = value;
     setPairs(next);
   }
-
-  function addPair() {
-    setPairs([...pairs, ['', '']]);
-  }
-
-  function removePair(idx) {
-    setPairs(pairs.filter((_, i) => i !== idx));
-  }
+  function addPair() { setPairs([...pairs, ['', '']]); }
+  function removePair(idx) { setPairs(pairs.filter((_, i) => i !== idx)); }
 
   async function setupGame() {
-    setMsg('');
-    // 빈 페어 제거
     const cleaned = pairs.filter((p) => p[0] && p[1] && p[0] !== p[1]);
     const res = await fetch('/api/admin/pd/setup', {
-      method: 'POST',
-      headers: authHeaders(),
+      method: 'POST', headers: authHeaders(),
       body: JSON.stringify({ secret, pairs: cleaned, payoff }),
     });
     const data = await res.json();
@@ -149,10 +134,8 @@ function AdminDashboard({ secret }) {
   }
 
   async function startGame() {
-    setMsg('');
     const res = await fetch('/api/admin/pd/start', {
-      method: 'POST',
-      headers: authHeaders(),
+      method: 'POST', headers: authHeaders(),
       body: JSON.stringify({ secret }),
     });
     const data = await res.json();
@@ -162,10 +145,8 @@ function AdminDashboard({ secret }) {
 
   async function confirmGame() {
     if (!confirm('확정하면 보수가 모든 학생의 잔고에 반영됩니다. 진행할까요?')) return;
-    setMsg('');
     const res = await fetch('/api/admin/pd/confirm', {
-      method: 'POST',
-      headers: authHeaders(),
+      method: 'POST', headers: authHeaders(),
       body: JSON.stringify({ secret }),
     });
     const data = await res.json();
@@ -176,8 +157,7 @@ function AdminDashboard({ secret }) {
   async function resetGame() {
     if (!confirm('게임 상태를 초기화합니다 (잔고는 유지). 계속할까요?')) return;
     const res = await fetch('/api/admin/pd/reset', {
-      method: 'POST',
-      headers: authHeaders(),
+      method: 'POST', headers: authHeaders(),
       body: JSON.stringify({ secret }),
     });
     const data = await res.json();
@@ -186,14 +166,14 @@ function AdminDashboard({ secret }) {
     refresh();
   }
 
+  // ---------- 잔고 ----------
   async function adjustBalance(studentId, delta) {
     const amt = prompt(`${delta > 0 ? '추가' : '차감'}할 금액(원)을 입력하세요`, '1000');
     if (!amt) return;
     const n = parseInt(amt, 10);
     if (isNaN(n)) return;
     const res = await fetch('/api/admin/balance', {
-      method: 'POST',
-      headers: authHeaders(),
+      method: 'POST', headers: authHeaders(),
       body: JSON.stringify({ secret, studentId, amount: delta * n }),
     });
     const data = await res.json();
@@ -202,13 +182,12 @@ function AdminDashboard({ secret }) {
   }
 
   async function setBalanceTo(studentId, currentBalance) {
-    const amt = prompt(`${studentId}의 잔고를 얼마로 설정할까요?`, String(currentBalance));
+    const amt = prompt(`잔고를 얼마로 설정할까요?`, String(currentBalance));
     if (amt === null) return;
     const n = parseInt(amt, 10);
     if (isNaN(n)) return;
     const res = await fetch('/api/admin/balance', {
-      method: 'POST',
-      headers: authHeaders(),
+      method: 'POST', headers: authHeaders(),
       body: JSON.stringify({ secret, studentId, set: n }),
     });
     const data = await res.json();
@@ -216,14 +195,57 @@ function AdminDashboard({ secret }) {
     refresh();
   }
 
+  // ---------- 학생 관리 ----------
+  async function manageStudent(action, payload = {}) {
+    const res = await fetch('/api/admin/students/manage', {
+      method: 'POST', headers: authHeaders(),
+      body: JSON.stringify({ secret, action, ...payload }),
+    });
+    const data = await res.json();
+    setMsg(data.ok ? '✓ 완료' : `오류: ${data.error}`);
+    refresh();
+    return data;
+  }
+
+  async function renameStudent(s) {
+    const newName = prompt('새 이름:', s.name);
+    if (!newName || newName.trim() === s.name) return;
+    await manageStudent('update', { id: s.id, name: newName.trim() });
+  }
+
+  async function toggleTestFlag(s) {
+    if (!confirm(`${s.name} 을(를) ${s.isTest ? '실제 학생' : '테스트 학생'}으로 바꿀까요?`)) return;
+    await manageStudent('update', { id: s.id, isTest: !s.isTest });
+  }
+
+  async function resetPin(s) {
+    if (!confirm(`${s.name}의 PIN을 1111로 초기화할까요?`)) return;
+    await manageStudent('reset-pin', { id: s.id });
+  }
+
+  async function removeStudent(s) {
+    if (!confirm(`${s.name}을(를) 명단에서 삭제할까요?\n(누적 상금도 함께 삭제됩니다)`)) return;
+    await manageStudent('delete', { id: s.id });
+  }
+
+  async function addNewStudent() {
+    const name = newStudentName.trim();
+    if (!name) return;
+    await manageStudent('add', { name, isTest: newIsTest });
+    setNewStudentName('');
+    setNewIsTest(false);
+  }
+
   if (loading || !pdState || !payoff) {
     return <div className="container"><div className="muted">로딩 중…</div></div>;
   }
 
-  // 모든 학생이 선택 제출했는지
   const totalAssigned = pdState.pairs.flat().length;
   const totalChoices = Object.keys(pdState.choices || {}).length;
   const allChose = pdState.status === 'active' && totalAssigned > 0 && totalChoices >= totalAssigned;
+
+  const realStudents = students.filter((s) => !s.isTest);
+  const testStudents = students.filter((s) => s.isTest);
 
   return (
     <div className="container">
@@ -243,7 +265,6 @@ function AdminDashboard({ secret }) {
       <div className="card">
         <div className="section-title">죄수의 딜레마</div>
         <div style={{ height: 8 }} />
-
         <div className="row" style={{ flexWrap: 'wrap', gap: 8 }}>
           {pdState.status === 'idle' && (
             <button className="btn btn-green" onClick={startGame} disabled={pdState.pairs.length === 0}>
@@ -256,37 +277,35 @@ function AdminDashboard({ secret }) {
             </button>
           )}
           {pdState.status === 'completed' && (
-            <div className="muted">라운드 완료. 새 라운드를 시작하려면 초기화하세요.</div>
+            <div className="muted">라운드 완료. 새 라운드는 초기화 후 시작.</div>
           )}
           <button className="btn btn-secondary" onClick={resetGame}>↺ 초기화</button>
         </div>
       </div>
 
-      {/* === 페이오프 행렬 편집 === */}
+      {/* === 페이오프 === */}
       <div className="card">
         <div className="section-title">보수 행렬 (단위: 원)</div>
         <div className="muted" style={{ fontSize: 12, margin: '8px 0' }}>
-          [행 학생 보수, 열 학생 보수]
+          [학생 1 보수, 학생 2 보수] · 학생 1은 행렬 왼쪽, 학생 2는 위쪽
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           {[
-            ['DD', '둘 다 부인 (D, D)'],
-            ['DR', '행 부인, 열 고발 (D, R)'],
-            ['RD', '행 고발, 열 부인 (R, D)'],
-            ['RR', '둘 다 고발 (R, R)'],
+            ['DD', '학생1 부인 · 학생2 부인 (D, D)'],
+            ['DR', '학생1 부인 · 학생2 고발 (D, R)'],
+            ['RD', '학생1 고발 · 학생2 부인 (R, D)'],
+            ['RR', '학생1 고발 · 학생2 고발 (R, R)'],
           ].map(([k, label]) => (
             <div key={k}>
               <label className="label">{label}</label>
               <div className="row">
                 <input
-                  className="input"
-                  type="number"
+                  className="input" type="number"
                   value={payoff[k][0]}
                   onChange={(e) => setPayoff({ ...payoff, [k]: [Number(e.target.value), payoff[k][1]] })}
                 />
                 <input
-                  className="input"
-                  type="number"
+                  className="input" type="number"
                   value={payoff[k][1]}
                   onChange={(e) => setPayoff({ ...payoff, [k]: [payoff[k][0], Number(e.target.value)] })}
                 />
@@ -304,21 +323,28 @@ function AdminDashboard({ secret }) {
             🎲 랜덤 자동 편성
           </button>
         </div>
+        <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+          왼쪽 = 학생 1 (행) · 오른쪽 = 학생 2 (열)
+        </div>
         <div style={{ height: 10 }} />
 
         {pairs.map((pair, idx) => (
           <div key={idx} className="admin-pair">
             <select value={pair[0]} onChange={(e) => setPair(idx, 0, e.target.value)}>
-              <option value="">— 행 학생 —</option>
+              <option value="">— 학생 1 —</option>
               {students.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
+                <option key={s.id} value={s.id}>
+                  {s.name}{s.isTest ? ' [test]' : ''}
+                </option>
               ))}
             </select>
             <span style={{ fontWeight: 700 }}>vs</span>
             <select value={pair[1]} onChange={(e) => setPair(idx, 1, e.target.value)}>
-              <option value="">— 열 학생 —</option>
+              <option value="">— 학생 2 —</option>
               {students.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
+                <option key={s.id} value={s.id}>
+                  {s.name}{s.isTest ? ' [test]' : ''}
+                </option>
               ))}
             </select>
             <button onClick={() => removePair(idx)} style={{ gridColumn: '1 / -1', color: 'var(--accent)', fontSize: 12, marginTop: 4 }}>
@@ -339,7 +365,7 @@ function AdminDashboard({ secret }) {
           <div className="section-title">선택 현황</div>
           <table className="balance-list">
             <thead>
-              <tr><th>짝</th><th>선택</th></tr>
+              <tr><th>짝 (학생1 vs 학생2)</th><th>선택</th></tr>
             </thead>
             <tbody>
               {pdState.pairs.map((pair, i) => {
@@ -385,30 +411,116 @@ function AdminDashboard({ secret }) {
         </div>
       )}
 
-      {/* === 학생 잔고 === */}
+      {/* === 학생 명단 관리 === */}
       <div className="card">
-        <div className="section-title">학생 누적 상금</div>
-        <table className="balance-list">
-          <thead><tr><th>이름</th><th>PIN</th><th className="amount-col">누적 상금</th><th></th></tr></thead>
-          <tbody>
-            {students.map((s) => (
-              <tr key={s.id}>
-                <td>{s.name}</td>
-                <td className="muted">{s.pin}</td>
-                <td className="amount-col">{(s.balance || 0).toLocaleString()}원</td>
-                <td style={{ textAlign: 'right' }}>
-                  <button onClick={() => adjustBalance(s.id, 1)} style={{ marginRight: 4, fontSize: 12 }}>+</button>
-                  <button onClick={() => adjustBalance(s.id, -1)} style={{ marginRight: 4, fontSize: 12 }}>−</button>
-                  <button onClick={() => setBalanceTo(s.id, s.balance || 0)} style={{ fontSize: 12 }}>=</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-          + : 추가 / − : 차감 / = : 직접 설정
+        <div className="section-title">학생 명단 / 잔고 관리</div>
+        <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+          이름 클릭 = 이름 수정 · ✎ = 잔고 +/− · ↺ = PIN을 1111로 초기화 · T = 테스트학생 토글 · ✕ = 삭제
         </div>
+        <div style={{ height: 10 }} />
+
+        <StudentTable
+          title={`실제 학생 (${realStudents.length}명)`}
+          students={realStudents}
+          onRename={renameStudent}
+          onResetPin={resetPin}
+          onToggleTest={toggleTestFlag}
+          onDelete={removeStudent}
+          onAdjust={adjustBalance}
+          onSetBalance={setBalanceTo}
+        />
+
+        <div style={{ height: 16 }} />
+
+        <StudentTable
+          title={`테스트 학생 (${testStudents.length}명)`}
+          students={testStudents}
+          isTest
+          onRename={renameStudent}
+          onResetPin={resetPin}
+          onToggleTest={toggleTestFlag}
+          onDelete={removeStudent}
+          onAdjust={adjustBalance}
+          onSetBalance={setBalanceTo}
+        />
+
+        <div style={{ height: 16 }} />
+        <div className="muted" style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>+ 학생 추가</div>
+        <div className="row" style={{ gap: 8 }}>
+          <input
+            className="input"
+            placeholder="이름"
+            value={newStudentName}
+            onChange={(e) => setNewStudentName(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && addNewStudent()}
+          />
+          <label className="muted" style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, whiteSpace: 'nowrap' }}>
+            <input type="checkbox" checked={newIsTest} onChange={(e) => setNewIsTest(e.target.checked)} />
+            테스트
+          </label>
+          <button className="btn btn-accent" onClick={addNewStudent} disabled={!newStudentName.trim()}>
+            추가
+          </button>
+        </div>
+        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+          ※ 새로 추가된 학생의 PIN은 자동으로 1111. 첫 로그인 시 본인이 변경.
+        </div>
+      </div>
+
+      <div className="muted" style={{ fontSize: 12, padding: '20px 0' }}>
+        💡 테스트 모드 학생 화면은 <code>/?test=1</code> URL로 접속.
       </div>
     </div>
   );
 }
+
+function StudentTable({ title, students, isTest, onRename, onResetPin, onToggleTest, onDelete, onAdjust, onSetBalance }) {
+  return (
+    <>
+      <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6, color: isTest ? 'var(--accent)' : 'var(--ink)' }}>
+        {title}
+      </div>
+      <table className="balance-list">
+        <thead>
+          <tr><th>이름</th><th>PIN</th><th className="amount-col">잔고</th><th></th></tr>
+        </thead>
+        <tbody>
+          {students.map((s) => (
+            <tr key={s.id} style={isTest ? { background: '#faf3e0' } : undefined}>
+              <td>
+                <button onClick={() => onRename(s)} style={{ fontSize: 14, fontWeight: 600, textDecoration: 'underline dotted' }}>
+                  {s.name}
+                </button>
+                <div className="muted" style={{ fontSize: 11 }}>{s.id}</div>
+              </td>
+              <td className="muted">
+                {s.pin === '1111' ? <span style={{ color: 'var(--accent)' }}>1111 (기본)</span> : '••••'}
+              </td>
+              <td className="amount-col">{(s.balance || 0).toLocaleString()}원</td>
+              <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                <button onClick={() => onAdjust(s.id, 1)} title="추가" style={btnSm}>+</button>
+                <button onClick={() => onAdjust(s.id, -1)} title="차감" style={btnSm}>−</button>
+                <button onClick={() => onSetBalance(s.id, s.balance || 0)} title="설정" style={btnSm}>=</button>
+                <button onClick={() => onResetPin(s)} title="PIN 초기화" style={btnSm}>↺</button>
+                <button onClick={() => onToggleTest(s)} title="테스트 토글" style={btnSm}>T</button>
+                <button onClick={() => onDelete(s)} title="삭제" style={{ ...btnSm, color: 'var(--accent)' }}>✕</button>
+              </td>
+            </tr>
+          ))}
+          {students.length === 0 && (
+            <tr><td colSpan="4" className="muted" style={{ textAlign: 'center', padding: 16 }}>없음</td></tr>
+          )}
+        </tbody>
+      </table>
+    </>
+  );
+}
+
+const btnSm = {
+  marginRight: 2,
+  padding: '2px 6px',
+  fontSize: 12,
+  border: '1px solid var(--line)',
+  borderRadius: 3,
+  background: '#fff',
+};

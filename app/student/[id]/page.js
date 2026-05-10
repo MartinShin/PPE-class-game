@@ -25,11 +25,8 @@ export default function StudentDashboard({ params }) {
 
   if (!me) return <div className="container"><div className="muted">로딩 중…</div></div>;
 
-  // 내가 짝지어진 게임이 있는지
   const myPair = pdState?.pairs?.find((p) => p.includes(id));
   const isInGame = pdState?.status === 'active' && !!myPair;
-
-  // 결과가 확정된 경우
   const myResult = pdState?.status === 'completed' && pdState?.results?.[id];
 
   return (
@@ -102,6 +99,11 @@ export default function StudentDashboard({ params }) {
           </div>
         )}
       </div>
+
+      <div style={{ height: 16 }} />
+      <Link href={`/student/${id}/change-pin`} className="muted" style={{ fontSize: 13, textDecoration: 'underline' }}>
+        PIN 변경
+      </Link>
     </div>
   );
 }

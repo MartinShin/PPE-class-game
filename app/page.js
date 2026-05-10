@@ -1,8 +1,11 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense } from 'react';
 
-export default function Home() {
+function HomeInner() {
+  const sp = useSearchParams();
+  const showTest = sp.get('test') === '1';
   const [students, setStudents] = useState([]);
   const [selected, setSelected] = useState(null);
   const [pin, setPin] = useState('');
@@ -11,10 +14,10 @@ export default function Home() {
   const router = useRouter();
 
   useEffect(() => {
-    fetch('/api/students')
+    fetch(`/api/students${showTest ? '?test=1' : ''}`)
       .then((r) => r.json())
       .then((d) => setStudents(d.students || []));
-  }, []);
+  }, [showTest]);
 
   async function submit() {
     if (!selected || !pin) return;
@@ -28,7 +31,12 @@ export default function Home() {
     const data = await res.json();
     setLoading(false);
     if (data.ok) {
-      router.push(`/student/${selected.id}`);
+      // 기본 PIN(1111)이면 변경 페이지로 강제 유도
+      if (data.student.isDefaultPin) {
+        router.push(`/student/${selected.id}/change-pin?first=1`);
+      } else {
+        router.push(`/student/${selected.id}`);
+      }
     } else {
       setError(data.error || 'PIN이 올바르지 않습니다');
       setPin('');
@@ -39,7 +47,10 @@ export default function Home() {
     <div className="container">
       <div className="header">
         <div className="title-kor">정치경제철학 개론</div>
-        <div className="subtitle">2026 봄학기 · 신호철 · 수업 게임</div>
+        <div className="subtitle">
+          2026 봄학기 · 신호철 · 수업 게임
+          {showTest && <span style={{ color: 'var(--accent)', marginLeft: 8 }}>· 테스트 모드</span>}
+        </div>
       </div>
 
       {!selected && (
@@ -52,11 +63,16 @@ export default function Home() {
                 key={s.id}
                 className="student-tile"
                 onClick={() => setSelected(s)}
+                style={s.isTest ? { borderStyle: 'dashed', background: '#faf3e0' } : undefined}
               >
                 {s.name}
+                {s.isTest && <div style={{ fontSize: 11, color: 'var(--accent)', marginTop: 2 }}>(test)</div>}
               </button>
             ))}
           </div>
+          {students.length === 0 && (
+            <div className="muted">학생 목록을 불러오는 중…</div>
+          )}
         </>
       )}
 
@@ -77,6 +93,9 @@ export default function Home() {
             onKeyDown={(e) => e.key === 'Enter' && submit()}
             autoFocus
           />
+          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+            ※ 처음 로그인하는 학생은 <b>1111</b>
+          </div>
           {error && <div className="error">{error}</div>}
           <div style={{ height: 14 }} />
           <button
@@ -100,5 +119,13 @@ export default function Home() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense fallback={<div className="container"><div className="muted">로딩…</div></div>}>
+      <HomeInner />
+    </Suspense>
   );
 }
