@@ -187,13 +187,13 @@ a { color: inherit; }
 }
 .payoff-cell .row-val {
   position: absolute;
-  top: 8px; left: 10px;
+  bottom: 8px; left: 10px;
   color: var(--green);
   font-weight: 700;
 }
 .payoff-cell .col-val {
   position: absolute;
-  bottom: 8px; right: 10px;
+  top: 8px; right: 10px;
   color: var(--accent);
   font-weight: 700;
 }
