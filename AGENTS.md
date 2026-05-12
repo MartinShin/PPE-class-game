@@ -3,7 +3,7 @@
 서울대학교 연합전공 정치경제철학 개론 (2026 봄학기, 신호철 교수) 수업용
 인터랙티브 게임 웹앱. 학생 16명이 핸드폰으로 접속해 게임 이론 수업 활동을 진행한다.
 
-> 마지막 업데이트: 2026-05 (게임 1 · 최저가 입찰 게임 추가 시점)
+> 마지막 업데이트: 2026-05 (게임 3 · 공공재 게임 추가)
 
 ## 사용자 (교수) 프로필
 
@@ -45,10 +45,11 @@ app/
 ├─ layout.js                     루트 레이아웃, 폰트 로드
 ├─ globals.css                   전역 스타일 (CSS 변수 사용)
 ├─ student/[id]/
-│  ├─ page.js                    학생 대시보드 (잔고 + 게임 1/2 카드)
+│  ├─ page.js                    학생 대시보드 (잔고 + 게임 1/2/3 카드)
 │  ├─ change-pin/page.js         학생 PIN 변경 (첫 로그인 시 강제)
 │  ├─ pd/page.js                 게임 2: 죄수의 딜레마 플레이
-│  └─ bid/page.js                게임 1: 최저가 입찰 게임 플레이
+│  ├─ bid/page.js                게임 1: 최저가 입찰 게임 플레이
+│  └─ pg/page.js                 게임 3: 공공재 게임 플레이
 ├─ admin/[secret]/page.js        교수 관리 페이지 (모든 게임 통합)
 └─ api/
    ├─ login/route.js                       학생 로그인
@@ -59,13 +60,17 @@ app/
    ├─ pd/choice/route.js                   게임 2 선택 제출
    ├─ bid/state/route.js                   게임 1 상태 조회
    ├─ bid/submit/route.js                  게임 1 숫자 제출
+   ├─ pg/state/route.js                    게임 3 상태 조회
+   ├─ pg/choice/route.js                   게임 3 기여 제출
+   ├─ pg/punish/route.js                   게임 3 처벌 포인트 제출
    └─ admin/
       ├─ auth/route.js                     관리자 로그인 (token 발급)
       ├─ students/route.js                 관리자용 학생 목록 (PIN 포함)
       ├─ students/manage/route.js          학생 add/update/delete/reset-pin
       ├─ balance/route.js                  잔고 수동 조정
-      ├─ pd/{setup,start,confirm,reset}/route.js     게임 2 관리
-      └─ bid/{setup,start,confirm,reset}/route.js    게임 1 관리
+      ├─ pd/{setup,start,confirm,reset}/route.js                     게임 2 관리
+      ├─ bid/{setup,start,confirm,reset}/route.js                    게임 1 관리
+      └─ pg/{setup,start,reveal,confirm,next,finish,reset}/route.js  게임 3 관리
 
 lib/
 ├─ redis.js                      Upstash 연결 + 모든 Redis I/O 함수
@@ -94,6 +99,28 @@ lib/
   - `results`: 확정 후 `{ lowestBid, winnerIds, winnerNames, winnerCount, prizePerWinner, payoffs }`
   - `startedAt`, `completedAt`: timestamp
 - `bid:history` — 게임 1 라운드 기록 누적 배열
+- `pg:state` — 게임 3 (공공재 게임) 현재 상태:
+  - `status`: `'idle' | 'active' | 'punishing' | 'completed' | 'finished'`
+    - `idle`: 게임 미시작. 그룹/설정 변경 가능.
+    - `active`: 현재 라운드 진행 중, 학생 기여 입력 단계
+    - `punishing`: (처벌 ON일 때만) 기여 공개 후 처벌 입력 단계
+    - `completed`: 현재 라운드 확정됨. admin이 다음 라운드 or 종료 선택
+    - `finished`: 모든 라운드 종료
+  - `currentRound`: 현재 라운드 (1..numRounds). 0 = 미시작
+  - `groups`: `[[id, id, ...], ...]` 그룹 편성. 매 라운드 동일 (partner matching)
+  - `contributions`: `{ studentId: 'C'|'N' (이산형) | number (연속형) }`
+  - `punishments`: `{ punisherId: { targetId: points, ... } }` (처벌 ON일 때만)
+  - `results`: 라운드 확정 후 `{ studentId: { contribution, basePayoff, punishGiven, punishReceived, punishCostTotal, punishLoss, roundPayoff, contributorsCount, groupSize, group, mode } }`
+  - `settings`:
+    - `mode`: `'discrete'` (관개 게임, 기여/비기여) | `'continuous'` (CORE 실험, 자유 액수)
+    - `cost`, `benefit`: 이산형 파라미터 (원). 기본 15000, 12000 (CORE: $10, $8)
+    - `endowment`, `mpcr`, `increment`: 연속형 파라미터. 기본 30000원, 0.4, 100원 단위
+    - `numRounds`: 총 라운드 수 (1 이상). admin 조정
+    - `punishmentEnabled`: 처벌 단계 토글 (기본 false)
+    - `punishmentCost`, `punishmentEffect`, `punishmentMax`: 1:3 비율, 최대 10포인트 기본값
+    - `exchangeRate`: 1달러 = ?원 (기본 1500, 표시 참고용)
+    - `strategies`: `{ C: '기여하기', N: '기여하지 않기' }` (관리자가 변경 가능. 내부 키 C/N 고정)
+- `pg:history` — 게임 3 라운드 기록 누적 배열
 
 ## 게임 진행 규약
 
@@ -120,6 +147,46 @@ lib/
 - 학생 2 = **열(col)** = 보수 행렬 위쪽 라벨
 - 각 셀에서 학생 1 보수는 **왼쪽 아래**(초록), 학생 2 보수는 **오른쪽 위**(빨강)
 - 보수는 항상 정수
+
+### 게임 3 · 공공재 게임
+
+CORE Econ 교재 4.6장 (Public good games and cooperation) 기반.
+
+**이산형** (관개 게임, Figure 4.8/4.9):
+- 그룹 N명, 기여 비용 C, 기여당 인당 편익 B
+- 그룹 내 기여자 수 k일 때:
+  - 기여한 학생: `k*B - C`
+  - 비기여 학생: `k*B`
+- 기본값: N=4 (admin 조정), C=15,000원 (=$10), B=12,000원 (=$8)
+- B/C = 0.8 (CORE 비율)
+
+**연속형** (CORE 실험, Figure 4.14a):
+- 매 라운드 endowment E 새로 지급, 학생 i가 c_i 기여 (0 ≤ c_i ≤ E)
+- 학생 i 라운드 보수: `(E - c_i) + MPCR * Σc_j`
+- 기본값: E=30,000원 (=$20), MPCR=0.4, 100원 단위 입력
+
+**처벌 단계 (옵션)** (Fehr-Gächter):
+- 토글 ON일 때 매 라운드 기여 → 기여 공개 → 처벌 → 확정 순으로 진행
+- 학생이 같은 그룹의 다른 멤버에게 처벌 포인트(0..max) 할당
+- 처벌 1포인트당 가해자 1,000원 비용, 피해자 3,000원 차감 (1:3 기본)
+- 1명당 최대 10포인트 (조정 가능)
+- 최종 라운드 보수 = 기본 보수 − cost × 가한 포인트 − effect × 받은 포인트 (음수 가능)
+
+**그룹 편성**:
+- 매 라운드 동일한 그룹 유지 (partner matching, CORE 실험 기본)
+- 자동 편성 (그룹 크기 admin 지정) 또는 수동 그룹 편집
+- 그룹 크기 불균등 가능 (4·4·5 등 결석 대응)
+- 그룹 최소 2명
+
+**라운드 진행**:
+- admin이 매 라운드 결과 확정 클릭 → 다음 라운드 시작 클릭 (자동 진행 안 함)
+- 단발(1라운드)부터 다라운드(10/20+)까지 admin이 지정
+- 마지막 라운드 확정 후 「게임 종료」로 finished 상태 전환
+
+**결과 공개**:
+- 학생: 그룹 내 기여자 수 + 본인 보수 (다른 학생의 이름·기여는 비공개)
+- 처벌 단계가 ON일 때만 처벌 단계에서 그룹원 기여가 이름과 함께 공개됨 (처벌 대상 선정 위해 불가피)
+- admin: 모든 학생의 기여·처벌·보수가 그룹별로 공개
 
 ## 코드 패턴
 

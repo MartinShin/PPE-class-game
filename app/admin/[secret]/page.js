@@ -71,6 +71,7 @@ function AdminDashboard({ secret }) {
   const [students, setStudents] = useState([]);
   const [pdState, setPdState] = useState(null);
   const [bidState, setBidState] = useState(null);
+  const [pgState, setPgState] = useState(null);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState('');
   const [pairs, setPairs] = useState([]);
@@ -79,6 +80,11 @@ function AdminDashboard({ secret }) {
 
   // 게임 1 설정 (편집 중 보전용)
   const [bidSettings, setBidSettings] = useState(null);
+
+  // 게임 3 설정 + 그룹 (편집 중 보전용)
+  const [pgSettings, setPgSettings] = useState(null);
+  const [pgGroups, setPgGroups] = useState([]);
+  const [autoGroupSize, setAutoGroupSize] = useState(4);
 
   const [newStudentName, setNewStudentName] = useState('');
   const [newIsTest, setNewIsTest] = useState(false);
@@ -100,12 +106,13 @@ function AdminDashboard({ secret }) {
     strategies?.[key] || (key === 'D' ? '부인' : '고발');
 
   async function refresh() {
-    const [r1, r2, r3] = await Promise.all([
+    const [r1, r2, r3, r4] = await Promise.all([
       fetch(`/api/admin/students?secret=${secret}`, {
         headers: authHeaders(),
       }).then((r) => r.json()),
       fetch('/api/pd/state').then((r) => r.json()),
       fetch('/api/bid/state?admin=1').then((r) => r.json()),
+      fetch('/api/pg/state').then((r) => r.json()),
     ]);
     if (r1.ok) setStudents(r1.students);
     if (r2.ok) {
@@ -128,6 +135,13 @@ function AdminDashboard({ secret }) {
             max: 10000,
             showWinnerNames: false,
           }
+      );
+    }
+    if (r4.ok) {
+      setPgState(r4.state);
+      setPgSettings((prev) => prev || r4.state.settings);
+      setPgGroups((prev) =>
+        prev.length === 0 && r4.state.groups?.length ? r4.state.groups : prev
       );
     }
     setLoading(false);
@@ -279,6 +293,154 @@ function AdminDashboard({ secret }) {
     refresh();
   }
 
+  // ============ 게임 3: 공공재 게임 컨트롤 ============
+  function autoMakeGroups() {
+    const size = Math.max(2, Math.floor(Number(autoGroupSize) || 4));
+    const ids = students.filter((s) => !s.isTest).map((s) => s.id);
+    for (let i = ids.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [ids[i], ids[j]] = [ids[j], ids[i]];
+    }
+    const groups = [];
+    for (let i = 0; i < ids.length; i += size) {
+      groups.push(ids.slice(i, i + size));
+    }
+    // 마지막 그룹이 너무 작으면(2명 미만) 앞 그룹에 합치기
+    if (groups.length >= 2 && groups[groups.length - 1].length < 2) {
+      const last = groups.pop();
+      groups[groups.length - 1].push(...last);
+    }
+    setPgGroups(groups);
+  }
+
+  function addPgGroup() {
+    setPgGroups([...pgGroups, []]);
+  }
+  function removePgGroup(gIdx) {
+    setPgGroups(pgGroups.filter((_, i) => i !== gIdx));
+  }
+  function addPgMember(gIdx) {
+    const next = pgGroups.map((g, i) => (i === gIdx ? [...g, ''] : g));
+    setPgGroups(next);
+  }
+  function removePgMember(gIdx, mIdx) {
+    const next = pgGroups.map((g, i) =>
+      i === gIdx ? g.filter((_, j) => j !== mIdx) : g
+    );
+    setPgGroups(next);
+  }
+  function setPgMember(gIdx, mIdx, value) {
+    const next = pgGroups.map((g, i) =>
+      i === gIdx ? g.map((m, j) => (j === mIdx ? value : m)) : g
+    );
+    setPgGroups(next);
+  }
+
+  async function savePgSetup() {
+    const cleaned = pgGroups
+      .map((g) => g.filter((id) => !!id))
+      .filter((g) => g.length >= 2);
+    const res = await fetch('/api/admin/pg/setup', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        secret,
+        groups: cleaned,
+        settings: pgSettings,
+      }),
+    });
+    const data = await res.json();
+    setMsg(data.ok ? '✓ 게임 3 설정 저장됨' : `오류: ${data.error}`);
+    refresh();
+  }
+
+  async function startPgGame() {
+    if (!confirm('공공재 게임을 시작합니다. 진행할까요?')) return;
+    const res = await fetch('/api/admin/pg/start', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ secret }),
+    });
+    const data = await res.json();
+    setMsg(data.ok ? '✓ 게임 3 시작 (라운드 1)' : `오류: ${data.error}`);
+    refresh();
+  }
+
+  async function revealPgContrib() {
+    if (
+      !confirm(
+        '기여를 공개하고 처벌 단계로 전환합니다. 모든 학생이 기여를 제출한 후에 진행하세요.'
+      )
+    )
+      return;
+    const res = await fetch('/api/admin/pg/reveal', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ secret }),
+    });
+    const data = await res.json();
+    setMsg(data.ok ? '✓ 기여 공개. 처벌 단계 시작' : `오류: ${data.error}`);
+    refresh();
+  }
+
+  async function confirmPgRound() {
+    if (
+      !confirm(
+        '이 라운드의 보수를 계산해 모든 학생 잔고에 반영합니다. 진행할까요?'
+      )
+    )
+      return;
+    const res = await fetch('/api/admin/pg/confirm', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ secret }),
+    });
+    const data = await res.json();
+    setMsg(data.ok ? '✓ 라운드 확정, 잔고 반영됨' : `오류: ${data.error}`);
+    refresh();
+  }
+
+  async function nextPgRound() {
+    const res = await fetch('/api/admin/pg/next', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ secret }),
+    });
+    const data = await res.json();
+    setMsg(data.ok ? '✓ 다음 라운드 시작' : `오류: ${data.error}`);
+    refresh();
+  }
+
+  async function finishPgGame() {
+    if (!confirm('공공재 게임을 종료합니다. 진행할까요?')) return;
+    const res = await fetch('/api/admin/pg/finish', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ secret }),
+    });
+    const data = await res.json();
+    setMsg(data.ok ? '✓ 게임 3 종료' : `오류: ${data.error}`);
+    refresh();
+  }
+
+  async function resetPgGame() {
+    if (
+      !confirm(
+        '공공재 게임 상태를 초기화합니다 (잔고와 히스토리는 유지). 계속할까요?'
+      )
+    )
+      return;
+    const res = await fetch('/api/admin/pg/reset', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ secret }),
+    });
+    const data = await res.json();
+    setMsg(data.ok ? '✓ 게임 3 초기화됨' : `오류: ${data.error}`);
+    setPgGroups([]);
+    refresh();
+  }
+
   // ============ 잔고 ============
   async function adjustBalance(studentId, delta) {
     const amt = prompt(
@@ -371,7 +533,7 @@ function AdminDashboard({ secret }) {
     setNewIsTest(false);
   }
 
-  if (loading || !pdState || !payoff || !strategies || !bidState || !bidSettings) {
+  if (loading || !pdState || !payoff || !strategies || !bidState || !bidSettings || !pgState || !pgSettings) {
     return (
       <div className="container">
         <div className="muted">로딩 중…</div>
@@ -402,6 +564,28 @@ function AdminDashboard({ secret }) {
     bidStatus === 'active' &&
     realStudents.length > 0 &&
     bidSubmittedRealCount >= realStudents.length;
+
+  // 게임 3 진행 현황
+  const pgStatus = pgState.status || 'idle';
+  const pgAssignedIds = (pgState.groups || []).flat();
+  const pgContribIds = Object.keys(pgState.contributions || {});
+  const pgPunishIds = Object.keys(pgState.punishments || {});
+  const pgContribCount = pgAssignedIds.filter((id) =>
+    pgContribIds.includes(id)
+  ).length;
+  const pgPunishCount = pgAssignedIds.filter((id) =>
+    pgPunishIds.includes(id)
+  ).length;
+  const pgAllContrib =
+    pgStatus === 'active' &&
+    pgAssignedIds.length > 0 &&
+    pgContribCount >= pgAssignedIds.length;
+  const pgAllPunish =
+    pgStatus === 'punishing' &&
+    pgAssignedIds.length > 0 &&
+    pgPunishCount >= pgAssignedIds.length;
+  const pgIsLastRound =
+    pgState.currentRound >= (pgSettings.numRounds || 1);
 
   return (
     <div className="container">
@@ -1004,6 +1188,791 @@ function AdminDashboard({ secret }) {
         </div>
       )}
 
+      {/* ====================================================== */}
+      {/* ============ 게임 3: 공공재 게임 ===================== */}
+      {/* ====================================================== */}
+      <div
+        className="card"
+        style={{ borderTop: '3px solid var(--green)' }}
+      >
+        <div className="row-between">
+          <div className="section-title" style={{ marginBottom: 0 }}>
+            게임 3 · 공공재 게임
+          </div>
+          <span
+            className={`status-badge status-${
+              pgStatus === 'punishing'
+                ? 'active'
+                : pgStatus === 'finished'
+                ? 'completed'
+                : pgStatus
+            }`}
+          >
+            {pgStatus === 'active'
+              ? `라운드 ${pgState.currentRound}/${pgSettings.numRounds} 진행 중`
+              : pgStatus === 'punishing'
+              ? `라운드 ${pgState.currentRound}/${pgSettings.numRounds} 처벌 단계`
+              : pgStatus === 'completed'
+              ? `라운드 ${pgState.currentRound}/${pgSettings.numRounds} 확정됨`
+              : pgStatus === 'finished'
+              ? `종료 (${pgSettings.numRounds}라운드)`
+              : '대기'}
+          </span>
+        </div>
+
+        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+          그룹별로 협력/배신 결정. {pgSettings.mode === 'discrete'
+            ? '이산형 (관개 게임 — 기여/비기여)'
+            : `연속형 (실험 — 0~${pgSettings.endowment.toLocaleString()}원 사이 자유 기여, MPCR ${pgSettings.mpcr})`}
+          {pgSettings.punishmentEnabled && ' · 처벌 단계 ON'}
+        </div>
+
+        <div style={{ height: 12 }} />
+
+        {/* 진행 컨트롤 */}
+        <div className="row" style={{ flexWrap: 'wrap', gap: 8 }}>
+          {pgStatus === 'idle' && (
+            <button
+              className="btn btn-green"
+              onClick={startPgGame}
+              disabled={pgGroups.length === 0}
+            >
+              ▶ 게임 시작 (라운드 1)
+            </button>
+          )}
+          {pgStatus === 'active' && (
+            <>
+              {pgSettings.punishmentEnabled ? (
+                <button
+                  className="btn btn-accent"
+                  onClick={revealPgContrib}
+                  disabled={pgContribCount === 0}
+                >
+                  → 기여 공개 / 처벌 단계로 ({pgContribCount}/
+                  {pgAssignedIds.length})
+                </button>
+              ) : (
+                <button
+                  className="btn btn-accent"
+                  onClick={confirmPgRound}
+                  disabled={pgContribCount === 0}
+                >
+                  ✓ 결과 확정 ({pgContribCount}/{pgAssignedIds.length})
+                </button>
+              )}
+            </>
+          )}
+          {pgStatus === 'punishing' && (
+            <button
+              className="btn btn-accent"
+              onClick={confirmPgRound}
+            >
+              ✓ 결과 확정 (처벌 {pgPunishCount}/{pgAssignedIds.length})
+            </button>
+          )}
+          {pgStatus === 'completed' && !pgIsLastRound && (
+            <button className="btn btn-green" onClick={nextPgRound}>
+              ▶ 다음 라운드 시작 (라운드 {pgState.currentRound + 1})
+            </button>
+          )}
+          {pgStatus === 'completed' && pgIsLastRound && (
+            <button className="btn btn-accent" onClick={finishPgGame}>
+              ■ 게임 종료
+            </button>
+          )}
+          {pgStatus === 'completed' && !pgIsLastRound && (
+            <button className="btn btn-secondary" onClick={finishPgGame}>
+              ■ 조기 종료
+            </button>
+          )}
+          <button className="btn btn-secondary" onClick={resetPgGame}>
+            ↺ 초기화
+          </button>
+        </div>
+
+        {pgStatus === 'active' && !pgAllContrib && pgContribCount > 0 && (
+          <div
+            className="muted"
+            style={{ fontSize: 12, marginTop: 8, color: 'var(--accent)' }}
+          >
+            ※ 아직 미제출 학생이 있습니다. 가급적 모두 제출한 뒤 진행하세요.
+          </div>
+        )}
+
+        {/* 진행 현황 (active 또는 punishing) */}
+        {(pgStatus === 'active' || pgStatus === 'punishing') &&
+          pgState.groups.length > 0 && (
+            <>
+              <div style={{ height: 14 }} />
+              <div
+                className="muted"
+                style={{
+                  fontSize: 13,
+                  fontWeight: 700,
+                  marginBottom: 6,
+                }}
+              >
+                {pgStatus === 'active' ? '기여 제출 현황' : '처벌 제출 현황'}
+              </div>
+              {pgState.groups.map((g, gIdx) => (
+                <div
+                  key={gIdx}
+                  style={{
+                    background: '#faf7f0',
+                    padding: 8,
+                    borderRadius: 4,
+                    marginBottom: 6,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 700,
+                      color: 'var(--ink-soft)',
+                      marginBottom: 4,
+                    }}
+                  >
+                    그룹 {gIdx + 1} ({g.length}명)
+                  </div>
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(2, 1fr)',
+                      gap: 4,
+                      fontSize: 13,
+                    }}
+                  >
+                    {g.map((sid) => {
+                      const stu = students.find((s) => s.id === sid);
+                      const submitted =
+                        pgStatus === 'active'
+                          ? pgContribIds.includes(sid)
+                          : pgPunishIds.includes(sid);
+                      const contribLabel =
+                        pgStatus === 'punishing' &&
+                        pgContribIds.includes(sid)
+                          ? pgSettings.mode === 'discrete'
+                            ? pgState.contributions[sid] === 'C'
+                              ? `(${pgSettings.strategies.C})`
+                              : `(${pgSettings.strategies.N})`
+                            : `(${Number(pgState.contributions[sid]).toLocaleString()}원)`
+                          : '';
+                      return (
+                        <div
+                          key={sid}
+                          style={{
+                            padding: '3px 6px',
+                            background: submitted ? '#e7f0e8' : '#fff',
+                            borderRadius: 3,
+                            border: stu?.isTest
+                              ? '1px dashed var(--accent)'
+                              : '1px solid var(--line)',
+                          }}
+                        >
+                          {submitted ? '✓' : '⏳'} {stu?.name || sid}
+                          {contribLabel && (
+                            <span
+                              style={{
+                                color: 'var(--ink-soft)',
+                                fontSize: 11,
+                                marginLeft: 4,
+                              }}
+                            >
+                              {contribLabel}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
+
+        {/* 결과 (completed일 때) */}
+        {pgStatus === 'completed' && pgState.results && (
+          <>
+            <div style={{ height: 14 }} />
+            <div
+              className="muted"
+              style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}
+            >
+              라운드 {pgState.currentRound} 결과
+            </div>
+            {pgState.groups.map((g, gIdx) => {
+              const groupContrib = g.reduce(
+                (acc, sid) =>
+                  acc + (pgState.results[sid]?.contribution.contributed ? 1 : 0),
+                0
+              );
+              const groupTotalContrib = g.reduce(
+                (acc, sid) =>
+                  acc + (pgState.results[sid]?.contribution.amount || 0),
+                0
+              );
+              return (
+                <div
+                  key={gIdx}
+                  style={{
+                    background: '#faf7f0',
+                    padding: 10,
+                    borderRadius: 4,
+                    marginBottom: 8,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 700,
+                      marginBottom: 6,
+                    }}
+                  >
+                    그룹 {gIdx + 1}{' '}
+                    <span
+                      style={{
+                        color: 'var(--ink-soft)',
+                        fontWeight: 400,
+                      }}
+                    >
+                      ({g.length}명 · 기여자{' '}
+                      {groupContrib}/{g.length}
+                      {pgSettings.mode === 'continuous' &&
+                        ` · 총 기여 ${groupTotalContrib.toLocaleString()}원`}
+                      )
+                    </span>
+                  </div>
+                  <table className="balance-list">
+                    <thead>
+                      <tr>
+                        <th>학생</th>
+                        <th>기여</th>
+                        {pgSettings.punishmentEnabled && <th>처벌(가/받)</th>}
+                        <th className="amount-col">보수</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {g.map((sid) => {
+                        const r = pgState.results[sid];
+                        const stu = students.find((s) => s.id === sid);
+                        if (!r) return null;
+                        return (
+                          <tr key={sid}>
+                            <td>
+                              {stu?.name || sid}
+                              {stu?.isTest && (
+                                <span
+                                  className="muted"
+                                  style={{ fontSize: 11 }}
+                                >
+                                  {' '}
+                                  [test]
+                                </span>
+                              )}
+                            </td>
+                            <td>
+                              {pgSettings.mode === 'discrete'
+                                ? r.contribution.contributed
+                                  ? '✓'
+                                  : '—'
+                                : `${r.contribution.amount.toLocaleString()}원`}
+                            </td>
+                            {pgSettings.punishmentEnabled && (
+                              <td style={{ fontSize: 13 }}>
+                                {r.punishGiven}/{r.punishReceived}
+                              </td>
+                            )}
+                            <td className="amount-col">
+                              {r.roundPayoff >= 0 ? '+' : ''}
+                              {r.roundPayoff.toLocaleString()}원
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })}
+          </>
+        )}
+      </div>
+
+      {/* === PG 설정 === */}
+      <div className="card">
+        <div className="section-title">게임 3 · 설정</div>
+
+        {/* 모드 토글 */}
+        <label className="label" style={{ marginTop: 8 }}>
+          게임 모드
+        </label>
+        <div className="row" style={{ gap: 14 }}>
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              fontSize: 14,
+            }}
+          >
+            <input
+              type="radio"
+              name="pgMode"
+              checked={pgSettings.mode === 'discrete'}
+              onChange={() =>
+                setPgSettings({ ...pgSettings, mode: 'discrete' })
+              }
+              disabled={pgStatus !== 'idle'}
+            />
+            이산형 (관개 게임 — 기여/비기여)
+          </label>
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              fontSize: 14,
+            }}
+          >
+            <input
+              type="radio"
+              name="pgMode"
+              checked={pgSettings.mode === 'continuous'}
+              onChange={() =>
+                setPgSettings({ ...pgSettings, mode: 'continuous' })
+              }
+              disabled={pgStatus !== 'idle'}
+            />
+            연속형 (CORE 실험 — 0~endowment 자유 기여)
+          </label>
+        </div>
+
+        <div style={{ height: 12 }} />
+
+        {/* 환율 + 라운드 수 */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: 10,
+          }}
+        >
+          <div>
+            <label className="label">환율 (1달러 = ?원, 참고용)</label>
+            <PgNumberInput
+              value={pgSettings.exchangeRate}
+              onChange={(v) =>
+                setPgSettings({ ...pgSettings, exchangeRate: v })
+              }
+              suffix="원"
+              disabled={pgStatus !== 'idle'}
+            />
+          </div>
+          <div>
+            <label className="label">총 라운드 수</label>
+            <input
+              className="input"
+              type="text"
+              inputMode="numeric"
+              value={pgSettings.numRounds}
+              onChange={(e) => {
+                const v = e.target.value.replace(/[^\d]/g, '');
+                setPgSettings({
+                  ...pgSettings,
+                  numRounds: Math.max(1, v === '' ? 1 : Number(v)),
+                });
+              }}
+              disabled={pgStatus !== 'idle'}
+              style={{ textAlign: 'right' }}
+            />
+          </div>
+        </div>
+
+        <div style={{ height: 12 }} />
+
+        {/* 모드별 파라미터 */}
+        {pgSettings.mode === 'discrete' ? (
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap: 10,
+            }}
+          >
+            <div>
+              <label className="label">기여 비용 C (원)</label>
+              <PgNumberInput
+                value={pgSettings.cost}
+                onChange={(v) => setPgSettings({ ...pgSettings, cost: v })}
+                suffix="원"
+                disabled={pgStatus !== 'idle'}
+              />
+              <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+                CORE: $10 → 15,000원
+              </div>
+            </div>
+            <div>
+              <label className="label">기여당 인당 편익 B (원)</label>
+              <PgNumberInput
+                value={pgSettings.benefit}
+                onChange={(v) =>
+                  setPgSettings({ ...pgSettings, benefit: v })
+                }
+                suffix="원"
+                disabled={pgStatus !== 'idle'}
+              />
+              <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+                CORE: $8 → 12,000원
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr 1fr',
+              gap: 10,
+            }}
+          >
+            <div>
+              <label className="label">Endowment (원)</label>
+              <PgNumberInput
+                value={pgSettings.endowment}
+                onChange={(v) =>
+                  setPgSettings({ ...pgSettings, endowment: v })
+                }
+                suffix="원"
+                disabled={pgStatus !== 'idle'}
+              />
+              <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+                CORE: $20 → 30,000원
+              </div>
+            </div>
+            <div>
+              <label className="label">MPCR</label>
+              <input
+                className="input"
+                type="text"
+                inputMode="decimal"
+                value={pgSettings.mpcr}
+                onChange={(e) => {
+                  const v = e.target.value.replace(/[^\d.]/g, '');
+                  const n = Number(v);
+                  setPgSettings({
+                    ...pgSettings,
+                    mpcr: Number.isFinite(n) ? n : 0,
+                  });
+                }}
+                disabled={pgStatus !== 'idle'}
+                style={{ textAlign: 'right' }}
+              />
+              <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+                CORE: 0.4
+              </div>
+            </div>
+            <div>
+              <label className="label">입력 단위 (원)</label>
+              <PgNumberInput
+                value={pgSettings.increment}
+                onChange={(v) =>
+                  setPgSettings({
+                    ...pgSettings,
+                    increment: Math.max(1, v),
+                  })
+                }
+                suffix="원"
+                disabled={pgStatus !== 'idle'}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* 전략 라벨 (이산형만) */}
+        {pgSettings.mode === 'discrete' && (
+          <>
+            <div style={{ height: 12 }} />
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: 10,
+              }}
+            >
+              <div>
+                <label className="label">전략 1 라벨 (내부: C)</label>
+                <input
+                  className="input"
+                  value={pgSettings.strategies.C}
+                  onChange={(e) =>
+                    setPgSettings({
+                      ...pgSettings,
+                      strategies: {
+                        ...pgSettings.strategies,
+                        C: e.target.value,
+                      },
+                    })
+                  }
+                  disabled={pgStatus !== 'idle'}
+                />
+              </div>
+              <div>
+                <label className="label">전략 2 라벨 (내부: N)</label>
+                <input
+                  className="input"
+                  value={pgSettings.strategies.N}
+                  onChange={(e) =>
+                    setPgSettings({
+                      ...pgSettings,
+                      strategies: {
+                        ...pgSettings.strategies,
+                        N: e.target.value,
+                      },
+                    })
+                  }
+                  disabled={pgStatus !== 'idle'}
+                />
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* 처벌 옵션 */}
+        <div style={{ height: 16 }} />
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            fontSize: 14,
+            fontWeight: 600,
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={pgSettings.punishmentEnabled}
+            onChange={(e) =>
+              setPgSettings({
+                ...pgSettings,
+                punishmentEnabled: e.target.checked,
+              })
+            }
+            disabled={pgStatus !== 'idle'}
+          />
+          처벌 단계 활성화 (Fehr-Gächter 식)
+        </label>
+        <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+          기여 공개 후 학생들이 비용을 들여 다른 멤버를 처벌할 수 있게 합니다.
+        </div>
+
+        {pgSettings.punishmentEnabled && (
+          <>
+            <div style={{ height: 10 }} />
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr 1fr',
+                gap: 10,
+              }}
+            >
+              <div>
+                <label className="label">포인트당 가해자 비용</label>
+                <PgNumberInput
+                  value={pgSettings.punishmentCost}
+                  onChange={(v) =>
+                    setPgSettings({ ...pgSettings, punishmentCost: v })
+                  }
+                  suffix="원"
+                  disabled={pgStatus !== 'idle'}
+                />
+              </div>
+              <div>
+                <label className="label">포인트당 피해자 차감</label>
+                <PgNumberInput
+                  value={pgSettings.punishmentEffect}
+                  onChange={(v) =>
+                    setPgSettings({ ...pgSettings, punishmentEffect: v })
+                  }
+                  suffix="원"
+                  disabled={pgStatus !== 'idle'}
+                />
+              </div>
+              <div>
+                <label className="label">1명당 최대 포인트</label>
+                <input
+                  className="input"
+                  type="text"
+                  inputMode="numeric"
+                  value={pgSettings.punishmentMax}
+                  onChange={(e) => {
+                    const v = e.target.value.replace(/[^\d]/g, '');
+                    setPgSettings({
+                      ...pgSettings,
+                      punishmentMax:
+                        v === '' ? 0 : Math.max(0, Number(v)),
+                    });
+                  }}
+                  disabled={pgStatus !== 'idle'}
+                  style={{ textAlign: 'right' }}
+                />
+              </div>
+            </div>
+          </>
+        )}
+
+        <div className="muted" style={{ fontSize: 12, marginTop: 10 }}>
+          ※ 설정/그룹 모두 「설정 저장」을 눌러야 학생 화면에 반영됩니다.
+          진행 중에는 변경 불가.
+        </div>
+      </div>
+
+      {/* === PG 그룹 편성 === */}
+      <div className="card">
+        <div className="row-between">
+          <div className="section-title" style={{ marginBottom: 0 }}>
+            게임 3 · 그룹 편성
+          </div>
+          <div className="row" style={{ gap: 6 }}>
+            <input
+              className="input"
+              type="text"
+              inputMode="numeric"
+              value={autoGroupSize}
+              onChange={(e) => {
+                const v = e.target.value.replace(/[^\d]/g, '');
+                setAutoGroupSize(v === '' ? 4 : Math.max(2, Number(v)));
+              }}
+              disabled={pgStatus !== 'idle'}
+              style={{
+                width: 60,
+                padding: '6px 8px',
+                fontSize: 13,
+                textAlign: 'center',
+              }}
+            />
+            <button
+              className="btn btn-secondary"
+              style={{ padding: '6px 10px', fontSize: 13 }}
+              onClick={autoMakeGroups}
+              disabled={pgStatus !== 'idle'}
+            >
+              🎲 {autoGroupSize}명씩 랜덤 편성
+            </button>
+          </div>
+        </div>
+
+        <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+          그룹 크기는 자유롭게 조정 가능 (4·4·5 같이 불균등도 OK). 매 라운드 동일한
+          그룹 유지 (partner matching).
+        </div>
+        <div style={{ height: 10 }} />
+
+        {pgGroups.length === 0 && (
+          <div className="muted" style={{ fontSize: 13, padding: 8 }}>
+            아직 그룹이 없습니다. 자동 편성 또는 「+ 그룹 추가」를 이용하세요.
+          </div>
+        )}
+
+        {pgGroups.map((g, gIdx) => (
+          <div
+            key={gIdx}
+            style={{
+              background: '#faf7f0',
+              padding: 10,
+              borderRadius: 4,
+              marginBottom: 8,
+            }}
+          >
+            <div className="row-between" style={{ marginBottom: 6 }}>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>
+                그룹 {gIdx + 1} ({g.length}명)
+              </div>
+              <button
+                onClick={() => removePgGroup(gIdx)}
+                disabled={pgStatus !== 'idle'}
+                style={{
+                  color: 'var(--accent)',
+                  fontSize: 12,
+                  opacity: pgStatus !== 'idle' ? 0.4 : 1,
+                }}
+              >
+                그룹 삭제
+              </button>
+            </div>
+            {g.map((sid, mIdx) => (
+              <div
+                key={mIdx}
+                style={{
+                  display: 'flex',
+                  gap: 6,
+                  marginBottom: 4,
+                }}
+              >
+                <select
+                  value={sid}
+                  onChange={(e) =>
+                    setPgMember(gIdx, mIdx, e.target.value)
+                  }
+                  disabled={pgStatus !== 'idle'}
+                  style={{
+                    flex: 1,
+                    padding: 6,
+                    border: '1px solid var(--line)',
+                    borderRadius: 4,
+                  }}
+                >
+                  <option value="">— 학생 선택 —</option>
+                  {students.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                      {s.isTest ? ' [test]' : ''}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => removePgMember(gIdx, mIdx)}
+                  disabled={pgStatus !== 'idle'}
+                  style={{
+                    padding: '4px 8px',
+                    color: 'var(--accent)',
+                    fontSize: 12,
+                  }}
+                >
+                  −
+                </button>
+              </div>
+            ))}
+            <button
+              onClick={() => addPgMember(gIdx)}
+              disabled={pgStatus !== 'idle'}
+              style={{
+                fontSize: 12,
+                color: 'var(--green)',
+                marginTop: 4,
+              }}
+            >
+              + 멤버 추가
+            </button>
+          </div>
+        ))}
+
+        <div className="row" style={{ marginTop: 8 }}>
+          <button
+            className="btn btn-secondary"
+            onClick={addPgGroup}
+            disabled={pgStatus !== 'idle'}
+          >
+            + 그룹 추가
+          </button>
+          <button
+            className="btn btn-accent"
+            onClick={savePgSetup}
+            disabled={pgStatus !== 'idle'}
+          >
+            설정 저장
+          </button>
+        </div>
+      </div>
+
       {/* === 학생 명단 관리 === */}
       <div className="card">
         <div className="section-title">학생 명단 / 잔고 관리</div>
@@ -1246,6 +2215,39 @@ function StudentTable({
         </tbody>
       </table>
     </>
+  );
+}
+
+// 천 단위 콤마 + 단위(suffix) 표시 + 직접 입력 가능. PG 설정에서 사용.
+function PgNumberInput({ value, onChange, suffix = '원', disabled = false }) {
+  return (
+    <div style={{ position: 'relative' }}>
+      <input
+        className="input"
+        type="text"
+        inputMode="numeric"
+        value={Number(value || 0).toLocaleString('ko-KR')}
+        onChange={(e) => {
+          const v = e.target.value.replace(/[^\d]/g, '');
+          onChange(v === '' ? 0 : Number(v));
+        }}
+        disabled={disabled}
+        style={{ paddingRight: 36, textAlign: 'right' }}
+      />
+      <span
+        style={{
+          position: 'absolute',
+          right: 12,
+          top: '50%',
+          transform: 'translateY(-50%)',
+          color: 'var(--ink-soft)',
+          fontSize: 14,
+          pointerEvents: 'none',
+        }}
+      >
+        {suffix}
+      </span>
+    </div>
   );
 }
 
